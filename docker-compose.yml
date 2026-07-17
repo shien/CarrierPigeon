@@ -1,0 +1,19 @@
+services:
+  carrierpigeon:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - DB_PATH=/data/carrierpigeon.db
+      - HEARTBEAT_PATH=/data/heartbeat
+    volumes:
+      - pigeon-data:/data
+    healthcheck:
+      test: ["CMD", "/carrierpigeon", "healthcheck"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  pigeon-data:

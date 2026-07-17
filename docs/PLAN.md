@@ -75,7 +75,7 @@ API クォータを節約するため、**RSS フィードで新着検知 → Da
 
 | 項目 | 選定 | 理由 |
 |---|---|---|
-| 言語 | Go 1.24 | 単一静的バイナリ → 極小コンテナ、goroutine によるポーリングの並行処理 |
+| 言語 | Go 1.25 | 単一静的バイナリ → 極小コンテナ、goroutine によるポーリングの並行処理 |
 | Discord ライブラリ | github.com/bwmarrin/discordgo | Gateway 接続・スラッシュコマンド対応のデファクトスタンダード |
 | YouTube API | google.golang.org/api/youtube/v3 | 公式クライアント。videos.list のバッチ照会 |
 | RSS パース | github.com/mmcdole/gofeed | YouTube フィードでの実績・簡便さ |
@@ -198,7 +198,7 @@ POLL_INTERVAL_SECONDS=300 # RSS ポーリング間隔(既定 5 分)
 LOG_LEVEL=INFO
 ```
 
-- Dockerfile はマルチステージビルド: `golang:1.24` で `CGO_ENABLED=0` の静的バイナリをビルドし、`gcr.io/distroless/static` に単一バイナリのみを配置(イメージ数十 MB・攻撃面最小)
+- Dockerfile はマルチステージビルド: `golang:1.25` で `CGO_ENABLED=0` の静的バイナリをビルドし、`gcr.io/distroless/static` に単一バイナリのみを配置(イメージ数十 MB・攻撃面最小)
 - ポート公開(`ports:`)は一切不要 — すべてアウトバウンド接続のため、インバウンド不可環境の要件と合致
 - ヘルスチェックはポーリングループの最終実行時刻をファイル/DB に記録し、同一バイナリの `healthcheck` サブコマンドで検査する方式(HTTP エンドポイントを立てない)
 - ログは stdout に出力し `docker compose logs` で確認
