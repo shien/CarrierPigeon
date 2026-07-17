@@ -75,11 +75,12 @@ API クォータを節約するため、**RSS フィードで新着検知 → Da
 
 | 項目 | 選定 | 理由 |
 |---|---|---|
-| 言語 | Python 3.12 | discord.py の成熟度、非同期処理(asyncio)との親和性 |
-| Discord ライブラリ | discord.py 2.x | Gateway 接続・スラッシュコマンド(app_commands)対応 |
-| HTTP クライアント | aiohttp | RSS / YouTube API の非同期取得 |
-| RSS パース | feedparser | 実績・簡便さ |
-| DB | SQLite(aiosqlite) | 単一コンテナ運用に十分。ボリュームで永続化 |
+| 言語 | Go 1.24 | 単一静的バイナリ → 極小コンテナ、goroutine によるポーリングの並行処理 |
+| Discord ライブラリ | github.com/bwmarrin/discordgo | Gateway 接続・スラッシュコマンド対応のデファクトスタンダード |
+| YouTube API | google.golang.org/api/youtube/v3 | 公式クライアント。videos.list のバッチ照会 |
+| RSS パース | github.com/mmcdole/gofeed | YouTube フィードでの実績・簡便さ |
+| HTTP クライアント | 標準ライブラリ net/http | 依存最小化(RSS 取得に使用) |
+| DB | SQLite(modernc.org/sqlite) | CGO 不要の pure-Go ドライバのため `CGO_ENABLED=0` の静的ビルドを維持できる。単一コンテナ運用に十分。ボリュームで永続化 |
 | コンテナ | Docker / Docker Compose | 要件 |
 
 Discord への投稿は Bot アカウント経由とする(Webhook URL 直叩きでも通知自体は可能だが、スラッシュコマンドによる監視チャンネル管理を行うため Bot 化する)。
@@ -88,7 +89,7 @@ Discord への投稿は Bot アカウント経由とする(Webhook URL 直叩き
 
 ```
 +--------------------------------------------------+
-| carrierpigeon コンテナ (単一プロセス, asyncio)     |
+| carrierpigeon コンテナ (単一プロセス, goroutine)   |
 |                                                  |
 |  +----------------+     +---------------------+  |
 |  | Discord Client |<--->| Command Handler     |  |
@@ -144,23 +145,27 @@ CREATE TABLE videos (
 ```
 CarrierPigeon/
 ├── docs/
-│   └── PLAN.md              # 本計画書
-├── src/carrierpigeon/
-│   ├── __main__.py          # エントリポイント
-│   ├── config.py            # 環境変数の読み込み・検証
-│   ├── bot.py               # Discord クライアント・スラッシュコマンド
-│   ├── notifier.py          # Embed 生成・送信
-│   ├── store.py             # SQLite アクセス層
-│   └── watchers/
-│       ├── base.py          # Watcher 抽象クラス(将来の他サービス拡張点)
-│       └── youtube.py       # RSS + Data API ポーリング
-├── tests/
-├── Dockerfile
+│   └── PLAN.md                  # 本計画書
+├── cmd/
+│   └── carrierpigeon/
+│       └── main.go              # エントリポイント(healthcheck サブコマンド含む)
+├── internal/
+│   ├── config/                  # 環境変数の読み込み・検証
+│   ├── bot/                     # discordgo クライアント・スラッシュコマンド
+│   ├── notifier/                # Embed 生成・送信
+│   ├── store/                   # SQLite アクセス層
+│   └── watcher/
+│       ├── watcher.go           # Watcher インターフェース(将来の他サービス拡張点)
+│       └── youtube/             # RSS + Data API ポーリング
+├── Dockerfile                   # マルチステージビルド
 ├── docker-compose.yml
 ├── .env.example
-├── pyproject.toml
+├── go.mod
+├── go.sum
 └── README.md
 ```
+
+テストは Go の慣習に従い各パッケージ内の `*_test.go` に置く。
 
 ## 9. Docker Compose 構成
 
@@ -176,7 +181,7 @@ services:
     environment:
       - DB_PATH=/data/carrierpigeon.db
     healthcheck:
-      test: ["CMD", "python", "-m", "carrierpigeon.healthcheck"]
+      test: ["CMD", "/carrierpigeon", "healthcheck"]
       interval: 60s
       timeout: 10s
       retries: 3
@@ -193,8 +198,9 @@ POLL_INTERVAL_SECONDS=300 # RSS ポーリング間隔(既定 5 分)
 LOG_LEVEL=INFO
 ```
 
+- Dockerfile はマルチステージビルド: `golang:1.24` で `CGO_ENABLED=0` の静的バイナリをビルドし、`gcr.io/distroless/static` に単一バイナリのみを配置(イメージ数十 MB・攻撃面最小)
 - ポート公開(`ports:`)は一切不要 — すべてアウトバウンド接続のため、インバウンド不可環境の要件と合致
-- ヘルスチェックはポーリングループの最終実行時刻をファイル/DB に記録し、それを検査する方式(HTTP エンドポイントを立てない)
+- ヘルスチェックはポーリングループの最終実行時刻をファイル/DB に記録し、同一バイナリの `healthcheck` サブコマンドで検査する方式(HTTP エンドポイントを立てない)
 - ログは stdout に出力し `docker compose logs` で確認
 
 ## 10. 事前準備(手動作業)
@@ -206,19 +212,19 @@ LOG_LEVEL=INFO
 
 | フェーズ | 内容 | 完了条件 |
 |---|---|---|
-| 1. 骨格 | プロジェクト雛形、config、Dockerfile / compose、Bot のログイン確認 | コンテナ起動で Bot がオンラインになる |
+| 1. 骨格 | go.mod・プロジェクト雛形、config、Dockerfile / compose、Bot のログイン確認 | コンテナ起動で Bot がオンラインになる |
 | 2. 購読管理 | SQLite スキーマ、`/subscribe` `/unsubscribe` `/list` 実装(URL/ハンドルからのチャンネル ID 解決含む) | コマンドで監視対象を CRUD できる |
 | 3. 新着通知 | RSS ポーリング、初回登録時の既存動画初期化、新着動画の Embed 通知 | 新規投稿が 1 回だけ通知される |
 | 4. ライブ通知 | Data API による種別判定、upcoming 追跡と live 遷移通知、適応的ポーリング | 予約・開始がそれぞれ 1 回だけ通知される |
 | 5. 運用性 | ヘルスチェック、リトライ/バックオフ、構造化ログ、README 整備 | compose で常用運用できる |
-| 6. テスト | store / watcher の単体テスト(API はモック)、CI 設定 | 主要ロジックにテストがある |
+| 6. テスト | store / watcher の単体テスト(`go test`。外部 API は httptest でモック、DB はインメモリ SQLite)、CI 設定 | 主要ロジックにテストがある |
 
 ## 12. エラーハンドリング方針
 
 - **RSS / API の一時失敗**: 指数バックオフでリトライし、失敗してもループは継続(次サイクルで回復)
 - **YouTube API クォータ枯渇 (403 quotaExceeded)**: Data API 呼び出しを翌日のクォータリセットまで停止し、RSS ベースの新着通知のみ継続(ライブ判定は劣化運転)。警告ログを出力
-- **Discord 送信失敗 / レートリミット**: discord.py の内蔵レートリミット処理に委譲。通知失敗時は notified フラグを立てず次サイクルで再送
-- **Gateway 切断**: discord.py の自動再接続に委譲。コンテナ異常終了時は `restart: unless-stopped` で復帰
+- **Discord 送信失敗 / レートリミット**: discordgo の内蔵レートリミット処理に委譲。通知失敗時は notified フラグを立てず次サイクルで再送
+- **Gateway 切断**: discordgo の自動再接続に委譲。コンテナ異常終了時は `restart: unless-stopped` で復帰
 
 ## 13. リスクと対策
 
