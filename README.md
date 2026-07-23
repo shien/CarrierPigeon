@@ -6,9 +6,40 @@ YouTube チャンネルの新着動画・ライブ配信(予約/開始)を Disco
 
 ## 必要なもの
 
-1. **Discord Bot トークン** — [Discord Developer Portal](https://discord.com/developers/applications) でアプリケーションを作成し、Bot トークンを発行。特権インテントは不要
-2. **YouTube Data API v3 キー** — [Google Cloud Console](https://console.cloud.google.com/) でプロジェクトを作成し、YouTube Data API v3 を有効化して API キーを発行
-3. Bot をサーバーに招待(OAuth2 URL Generator で scope: `bot` `applications.commands`、権限: Send Messages / Embed Links)
+1. **Discord Bot トークン**
+   1. [Discord Developer Portal](https://discord.com/developers/applications) にアクセスしてログイン
+   2. 右上の「New Application」でアプリケーションを作成
+   3. 左メニューの「Bot」を開き、「Reset Token」(初回は表示されるトークン)を「Copy」する
+      - トークンは一度しか表示されないため、その場でコピーして保管する
+      - 特権インテント(Presence/Server Members/Message Content)は不要
+2. **YouTube Data API v3 キー**
+   1. [Google Cloud Console](https://console.cloud.google.com/) にアクセスしてログイン
+   2. 新しいプロジェクトを作成(または既存プロジェクトを選択)
+   3. 「APIとサービス」→「ライブラリ」で「YouTube Data API v3」を検索し「有効にする」
+   4. 「APIとサービス」→「認証情報」→「認証情報を作成」→「APIキー」でキーを発行
+      - 発行後「APIキーを制限」から「YouTube Data API v3」のみに制限しておくと安全
+3. **Bot をサーバーに招待**
+   1. Developer Portal の「OAuth2」→「URL Generator」を開く
+   2. SCOPES で `bot` `applications.commands` にチェック
+   3. BOT PERMISSIONS で `Send Messages` `Embed Links` にチェック
+   4. 生成された URL をブラウザで開き、招待先サーバーを選択
+
+## Dockerのインストール(未導入の場合)
+
+WSL2(Ubuntu)環境であれば、以下のスクリプトでDocker Engineを直接インストールできます。
+
+```console
+$ ./setup/install-docker.sh
+```
+
+実行後、グループ変更を反映するためWSLを再起動(Windows側で `wsl --shutdown` してから再度開く)し、以下でデーモンを起動・確認します。
+
+```console
+$ sudo service docker start
+$ docker run hello-world
+```
+
+WSL2以外、またはGUIでの管理を好む場合は [Docker Desktop for Windows](https://www.docker.com/products/docker-desktop/) をインストールし、設定の「WSL Integration」で対象ディストリビューションを有効化する方法もあります。
 
 ## 起動
 
