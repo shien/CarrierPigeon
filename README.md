@@ -71,6 +71,58 @@ $ docker compose logs -f
 | `HEARTBEAT_PATH` | `/data/heartbeat` | ヘルスチェック用ハートビートファイル |
 | `LOG_LEVEL` | `info` | `debug` / `info` / `warn` / `error` |
 
+## データ移行 / バックアップ
+
+Bot の状態はすべて SQLite ファイル 1 個に入っているため、別サーバーへの移行は「DB ファイルと `.env` を運ぶ」だけで済みます。
+
+| 対象 | 実体 | 移行 |
+|---|---|---|
+| コード | git リポジトリ | 不要(新サーバーで `git clone`) |
+| 状態データ | ボリューム `pigeon-data` 内の `/data/carrierpigeon.db`(購読一覧と通知済み状態) | **必要** |
+| シークレット | `.env` | 必要(または新サーバーで再設定) |
+| ハートビート | `/data/heartbeat` | 不要(起動後に再生成) |
+
+DB を移さずに新規で始めることもできますが、その場合は `/subscribe` で購読を登録し直す必要があります(登録時に既存動画を通知済みとして初期化するため、過去動画の一斉通知は起きません)。
+
+### 1. 旧サーバー: 停止してボリュームを取り出す
+
+SQLite は WAL モードで動作しているため、稼働中にコピーすると未反映の書き込みが欠ける恐れがあります。先に停止すると WAL が `.db` に反映され、ファイル単体で完結した状態になります。
+
+```console
+$ docker compose down                      # 停止(ボリュームは消えない)
+$ docker volume ls | grep pigeon-data      # 実際のボリューム名を確認(例: carrierpigeon_pigeon-data)
+$ docker run --rm \
+    -v carrierpigeon_pigeon-data:/data \
+    -v "$PWD":/backup \
+    alpine tar czf /backup/pigeon-data.tar.gz -C /data .
+```
+
+### 2. 新サーバーへ転送
+
+```console
+$ scp pigeon-data.tar.gz .env user@new-host:/path/to/CarrierPigeon/
+```
+
+### 3. 新サーバー: 復元して起動
+
+```console
+$ git clone <このリポジトリ> CarrierPigeon && cd CarrierPigeon
+$ # 転送した .env と pigeon-data.tar.gz をここに置く
+$ docker volume create carrierpigeon_pigeon-data
+$ docker run --rm \
+    -v carrierpigeon_pigeon-data:/data \
+    -v "$PWD":/backup \
+    alpine tar xzf /backup/pigeon-data.tar.gz -C /data
+$ docker compose up -d --build
+$ docker compose logs -f                   # Bot のログインとポーリング開始を確認
+```
+
+### 注意点
+
+- **ボリューム名**: compose はボリューム名の先頭にプロジェクト名(既定はディレクトリ名の小文字)を付けます。旧・新でディレクトリ名が違うとボリューム名も変わるため、`docker volume ls` で確認してコマンド中の名前を合わせてください。
+- **二重起動の禁止**: 同じ Bot トークンで旧・新サーバーを同時に動かさないでください。通知が二重に届くうえ、Discord Gateway のセッションが競合します。移行を確認したら旧サーバーは停止したままにします。
+- **バックアップ**: 手順 1 の tar を定期的に保存しておけば、そのままバックアップになります。復元は手順 3 と同じです。
+
 ## 開発
 
 ```console
