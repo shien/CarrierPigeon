@@ -152,6 +152,13 @@ func (b *Bot) handleSubscribe(ctx context.Context, i *discordgo.InteractionCreat
 	notifyChannelID := i.ChannelID
 	if opt, ok := opts["notify_channel"]; ok {
 		notifyChannelID = opt.Value.(string)
+		// The option's UI is restricted to channels in this guild, but
+		// that's a client-side convenience only: a forged interaction
+		// could name a channel in a different guild entirely. Confirm
+		// server-side before letting it become a notification target.
+		if err := b.requireChannelInGuild(notifyChannelID, i.GuildID); err != nil {
+			return "", err
+		}
 	}
 
 	id, title, err := b.Resolver.ResolveChannel(ctx, input)
@@ -223,6 +230,23 @@ func (b *Bot) handleList(ctx context.Context, i *discordgo.InteractionCreate) (s
 		fmt.Fprintf(&sb, "- %s (`%s`) → <#%s>\n", s.YTChannelName, s.YTChannelID, s.DiscordChannelID)
 	}
 	return sb.String(), nil
+}
+
+// requireChannelInGuild confirms channelID actually belongs to guildID,
+// so a tampered interaction can't point notifications at a channel in a
+// different guild than the one the invoker has Manage Server on.
+func (b *Bot) requireChannelInGuild(channelID, guildID string) error {
+	ch, err := b.Session.State.Channel(channelID)
+	if err != nil {
+		ch, err = b.Session.Channel(channelID)
+		if err != nil {
+			return fmt.Errorf("通知先チャンネルを確認できませんでした (%w)", err)
+		}
+	}
+	if ch.GuildID != guildID {
+		return fmt.Errorf("通知先チャンネルはこのサーバーに属していません")
+	}
+	return nil
 }
 
 func optionMap(i *discordgo.InteractionCreate) map[string]*discordgo.ApplicationCommandInteractionDataOption {
